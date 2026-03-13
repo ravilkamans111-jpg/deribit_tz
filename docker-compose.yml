@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: deribit-db
+    environment:
+      POSTGRES_USER: deribit_user
+      POSTGRES_PASSWORD: deribit_password
+      POSTGRES_DB: deribit_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deribit_user -d deribit_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: deribit-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  app:
+    build: .
+    container_name: deribit-app
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery-worker:
+    build: .
+    container_name: deribit-celery-worker
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+    command: celery -A src.tasks.fetch_prices.celery_app worker --loglevel=info
+
+  celery-beat:
+    build: .
+    container_name: deribit-celery-beat
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+      - celery-worker
+    command: celery -A src.tasks.fetch_prices.celery_app beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
